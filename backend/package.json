@@ -1,0 +1,22 @@
+{
+  "name": "contextualize-backend",
+  "version": "1.0.0",
+  "description": "LLM proxy backend for Contextualize chat app",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "openai": "^4.24.1",
+    "@google/generative-ai": "^0.1.3",
+    "axios": "^1.6.2",
+    "@supabase/supabase-js": "^2.38.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
