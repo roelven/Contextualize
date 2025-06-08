@@ -47,11 +47,14 @@ app.post('/api/llm', async (req, res) => {
   try {
     const { spaceId, messages, systemPrompt, provider = 'openai' } = req.body
 
+    // Default system prompt if none provided
+    const finalSystemPrompt = systemPrompt || 'You are Nimbus, a helpful AI assistant participating in a multiplayer chat. Respond conversationally and helpfully when mentioned with @Nimbus.'
+
     if (provider === 'openai') {
       const completion = await openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages: [
-          { role: 'system', content: systemPrompt },
+          { role: 'system', content: finalSystemPrompt },
           ...messages
         ],
       })
@@ -72,7 +75,7 @@ app.post('/api/llm', async (req, res) => {
     } else if (provider === 'gemini') {
       const model = genAI.getGenerativeModel({ model: 'gemini-pro' })
       
-      const prompt = systemPrompt + '\n\n' + messages.map(m => `${m.role}: ${m.content}`).join('\n')
+      const prompt = finalSystemPrompt + '\n\n' + messages.map(m => `${m.role}: ${m.content}`).join('\n')
       const result = await model.generateContent(prompt)
       const aiResponse = result.response.text()
 

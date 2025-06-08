@@ -44,6 +44,29 @@ export interface Database {
           created_at?: string
         }
       }
+      space_members: {
+        Row: {
+          id: string
+          space_id: string
+          user_id: string
+          role: 'owner' | 'member'
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          space_id: string
+          user_id: string
+          role?: 'owner' | 'member'
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          space_id?: string
+          user_id?: string
+          role?: 'owner' | 'member'
+          created_at?: string
+        }
+      }
       messages: {
         Row: {
           id: string

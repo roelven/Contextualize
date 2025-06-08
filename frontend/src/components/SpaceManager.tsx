@@ -5,6 +5,12 @@ import { useRouter } from 'next/navigation'
 import { Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { Database } from '@/types/database'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Separator } from '@/components/ui/separator'
+import { Badge } from '@/components/ui/badge'
+import { Copy, LogOut, Plus } from 'lucide-react'
 
 type Space = Database['public']['Tables']['spaces']['Row']
 
@@ -24,6 +30,7 @@ export default function SpaceManager({ session }: SpaceManagerProps) {
   }, [])
 
   const fetchSpaces = async () => {
+    // Only fetch spaces where the user is a member
     const { data, error } = await supabase
       .from('spaces')
       .select('*')
@@ -47,7 +54,7 @@ export default function SpaceManager({ session }: SpaceManagerProps) {
       .from('spaces')
       .insert({
         name: newSpaceName.trim(),
-        system_prompt: 'You are a helpful assistant participating in a multiplayer chat. Respond conversationally and helpfully when mentioned with @ai.',
+        system_prompt: 'You are Nimbus, a helpful AI assistant participating in a multiplayer chat. Respond conversationally and helpfully when mentioned with @Nimbus.',
         created_by: session.user.id
       })
       .select()
@@ -66,7 +73,7 @@ export default function SpaceManager({ session }: SpaceManagerProps) {
   const copySpaceLink = (spaceId: string) => {
     const link = `${window.location.origin}/space/${spaceId}`
     navigator.clipboard.writeText(link)
-    alert('Space link copied to clipboard!')
+    // You could add a toast notification here
   }
 
   const signOut = async () => {
@@ -82,87 +89,102 @@ export default function SpaceManager({ session }: SpaceManagerProps) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 p-4 flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Contextualize Spaces</h1>
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-gray-600">{session.user.email}</span>
-          <button
-            onClick={signOut}
-            className="text-sm text-red-600 hover:text-red-700"
-          >
-            Sign Out
-          </button>
+      <div className="border-b">
+        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
+          <h1 className="text-2xl font-bold">Contextualize</h1>
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-muted-foreground">{session.user.email}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={signOut}
+              className="text-destructive hover:text-destructive"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Sign Out
+            </Button>
+          </div>
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto p-6">
+      <div className="container mx-auto max-w-4xl p-6">
         {/* Create New Space */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">Create New Space</h2>
-          <form onSubmit={createSpace} className="flex gap-3">
-            <input
-              type="text"
-              value={newSpaceName}
-              onChange={(e) => setNewSpaceName(e.target.value)}
-              placeholder="Enter space name..."
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={creatingSpace}
-            />
-            <button
-              type="submit"
-              disabled={creatingSpace || !newSpaceName.trim()}
-              className="px-6 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:opacity-50"
-            >
-              {creatingSpace ? 'Creating...' : 'Create Space'}
-            </button>
-          </form>
-        </div>
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Create New Space</CardTitle>
+            <CardDescription>Start a new private conversation space</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={createSpace} className="flex gap-3">
+              <Input
+                type="text"
+                value={newSpaceName}
+                onChange={(e) => setNewSpaceName(e.target.value)}
+                placeholder="Enter space name..."
+                disabled={creatingSpace}
+                className="flex-1"
+              />
+              <Button
+                type="submit"
+                disabled={creatingSpace || !newSpaceName.trim()}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                {creatingSpace ? 'Creating...' : 'Create Space'}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
 
         {/* Spaces List */}
-        <div className="bg-white rounded-lg shadow-md">
-          <div className="p-6 border-b border-gray-200">
-            <h2 className="text-xl font-semibold">Available Spaces</h2>
-          </div>
-          
-          {spaces.length === 0 ? (
-            <div className="p-6 text-center text-gray-500">
-              No spaces available. Create your first space above!
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-200">
-              {spaces.map((space) => (
-                <div key={space.id} className="p-6 hover:bg-gray-50">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <h3 className="text-lg font-medium text-gray-900">
-                        {space.name}
-                      </h3>
-                      <p className="text-sm text-gray-500 mt-1">
-                        Created {new Date(space.created_at).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <div className="flex gap-3">
-                      <button
-                        onClick={() => copySpaceLink(space.id)}
-                        className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
-                      >
-                        Copy Link
-                      </button>
-                      <button
-                        onClick={() => router.push(`/space/${space.id}`)}
-                        className="px-4 py-2 text-sm bg-blue-500 text-white rounded-md hover:bg-blue-600"
-                      >
-                        Enter Space
-                      </button>
+        <Card>
+          <CardHeader>
+            <CardTitle>Your Spaces</CardTitle>
+            <CardDescription>Private spaces you have access to</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {spaces.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                No spaces available. Create your first space above!
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {spaces.map((space, index) => (
+                  <div key={space.id}>
+                    {index > 0 && <Separator className="mb-4" />}
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <h3 className="text-lg font-medium">
+                          {space.name}
+                        </h3>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Created {new Date(space.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => copySpaceLink(space.id)}
+                        >
+                          <Copy className="h-4 w-4 mr-2" />
+                          Copy Link
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => router.push(`/space/${space.id}`)}
+                        >
+                          Enter Space
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   )
