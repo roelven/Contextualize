@@ -13,7 +13,13 @@
       "Bash(npm start)",
       "Bash(node:*)",
       "Bash(BACKEND_DIR=\"/Users/roel/Code/Contextualize/backend\")",
-      "Bash(docker:*)"
+      "Bash(docker:*)",
+      "Bash(supabase status:*)",
+      "Bash(supabase projects:*)",
+      "Bash(supabase init:*)",
+      "Bash(supabase link:*)",
+      "Bash(supabase migration list:*)",
+      "Bash(supabase db:*)"
     ]
   },
   "enableAllProjectMcpServers": false
