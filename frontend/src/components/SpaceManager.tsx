@@ -9,7 +9,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { Badge } from '@/components/ui/badge'
 import { Copy, LogOut, Plus } from 'lucide-react'
 
 type Space = Database['public']['Tables']['spaces']['Row']
@@ -30,10 +29,30 @@ export default function SpaceManager({ session }: SpaceManagerProps) {
   }, [])
 
   const fetchSpaces = async () => {
-    // Only fetch spaces where the user is a member
+    // First, get all space IDs where the user is a member
+    const { data: membershipData, error: membershipError } = await supabase
+      .from('space_members')
+      .select('space_id')
+      .eq('user_id', session.user.id)
+
+    if (membershipError) {
+      console.error('Error fetching user memberships:', membershipError)
+      setLoading(false)
+      return
+    }
+
+    if (!membershipData || membershipData.length === 0) {
+      setSpaces([])
+      setLoading(false)
+      return
+    }
+
+    // Get space details for all spaces where user is a member
+    const spaceIds = membershipData.map(m => m.space_id)
     const { data, error } = await supabase
       .from('spaces')
       .select('*')
+      .in('id', spaceIds)
       .order('created_at', { ascending: false })
 
     if (error) {

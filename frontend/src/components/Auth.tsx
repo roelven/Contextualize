@@ -35,8 +35,8 @@ export default function Auth() {
         })
         if (error) throw error
       }
-    } catch (error: any) {
-      setMessage({ type: 'error', text: error.message })
+    } catch (error: unknown) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'An error occurred' })
     } finally {
       setLoading(false)
     }

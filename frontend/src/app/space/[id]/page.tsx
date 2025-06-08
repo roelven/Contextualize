@@ -39,7 +39,7 @@ export default function SpacePage() {
     } else if (!loading && !session) {
       setCheckingAccess(false)
     }
-  }, [session, spaceId, loading])
+  }, [session, spaceId, loading]) // checkSpaceAccess is defined inline and uses session/spaceId which are already in deps
 
   const checkSpaceAccess = async () => {
     setCheckingAccess(true)
@@ -94,7 +94,7 @@ export default function SpacePage() {
           <CardHeader>
             <CardTitle>Access Denied</CardTitle>
             <CardDescription>
-              You don't have access to this space. Please check the link or contact the space owner.
+              You don&apos;t have access to this space. Please check the link or contact the space owner.
             </CardDescription>
           </CardHeader>
           <CardContent>

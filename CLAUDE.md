@@ -2,36 +2,87 @@
 
 ## 🧭 Overview
 
-A full-stack, multiplayer chat application where users can converse in real time and interact with an LLM (OpenAI, Gemini, Deepseek) as a participant. The system is built for fast, seamless UX, supports media uploads, and keeps LLM API keys secure via a minimal backend proxy.
+A full-stack, multiplayer chat application where users can converse in real time and interact with **Nimbus** (an LLM powered by OpenAI, Gemini, or Deepseek) as a participant. The system is built for fast, seamless UX with a modern shadcn/ui interface, supports media uploads with drag & drop, and keeps LLM API keys secure via a minimal backend proxy.
 
 ---
 
 ## 🛠️ Tech Stack
 
-- **Frontend:** React (Next.js), Supabase UI Library
-- **Backend:** Minimal Node.js/Express or FastAPI (Python) server for LLM proxying and instruction configuration
+- **Frontend:** React (Next.js) with shadcn/ui components and Tailwind CSS
+- **Backend:** Minimal Node.js/Express server for LLM proxying and instruction configuration
 - **Real-time/Data/Auth/Storage:** Supabase (DB, Realtime, Auth, Storage)
 - **LLM Providers:** OpenAI, Gemini, Deepseek (configurable per instance)
+- **UI Library:** shadcn/ui with Radix UI primitives for modern, accessible components
 - **Deployment:** Dockerized, frontend and backend deployable together or separately, works with custom domains and Cloudflare tunnels
 
 ---
 
 ## 🔑 Core Features
 
-- **Multiplayer Chat:**  
-  - Unique “spaces” accessible via URL, showing real-time conversation history.
-  - Multiple users per space, all messages tagged by sender.
-  - Users can be addressed when tagged, like "Hey @Barry!".
+### ✅ Implemented Features
+
+- **Private Spaces with Sharing:**
+  - Spaces are private by default - only members can see them
+  - When someone accesses a space via shared URL, they're automatically added as a member
+  - Space owners have special privileges (can edit settings, manage system prompts)
+  - Member count displayed in space header
+
+- **Modern UI with shadcn/ui:**
+  - Complete UI refactor using shadcn/ui components (Button, Input, Card, Dialog, etc.)
+  - Consistent, modern design with proper TypeScript integration
+  - Responsive layout with proper spacing and accessibility
+
+- **Enhanced Chat Experience:**
+  - Real-time messaging with proper username display (no more user IDs)
+  - Messages show usernames instead of user IDs with improved data fetching
+  - Optimistic UI updates for better perceived performance
+  - Space name prominently displayed (space ID hidden from UI)
+
+- **@Mention Functionality:**
+  - Type "@" to get dropdown showing available participants
+  - Users can select from other members or **Nimbus** (the AI assistant)
+  - Proper autocomplete functionality with search
+  - Mentioning @Nimbus triggers AI response
+
+- **Image Upload & Display:**
+  - Drag & drop functionality on message input area
+  - Image preview before sending messages
+  - Images uploaded to Supabase Storage only when message is submitted
+  - Visual feedback during upload process
+  - Automatic detection and inline rendering of image URLs in messages
+  - Proper image sizing (max-width constrained)
+
+- **Space Settings Panel:**
+  - Settings panel accessible via Settings button (space owners only)
+  - Owners can configure system prompt for Nimbus behavior
+  - Settings saved to database with real-time updates
+
+- **Nimbus AI Assistant:**
+  - All references changed from "AI" to "Nimbus" 
+  - Updated system prompts and UI references accordingly
+  - Nimbus participates as a chat member when mentioned
+  - Proxy backend ensures API keys for all providers stay secret
+
 - **Authentication:**  
-  - Off-the-shelf Supabase Auth (email/password, optional social login).
-- **LLM Integration:**  
-  - Proxy backend ensures API keys for all providers stay secret.
-  - LLM can be addressed by @mention, or (configurable) chime in when relevant.
-  - System prompt/instructions are configurable per space for refined behavior.
-- **Media Support:**  
-  - Users can upload images (client-side resizing), stored via Supabase Storage, referenced in messages.
-- **Performance:**  
-  - Instant chat updates via Supabase Realtime, and LLM replies streamed when possible for “instant” feel.
+  - Supabase Auth (email/password) with session management
+  - Automatic user profile creation and management
+
+### 🔧 Technical Improvements
+
+- **Better TypeScript Integration:**
+  - Extended interfaces for joined data relationships
+  - Proper type safety throughout the application
+  - Database types generated from Supabase schema
+
+- **Enhanced Data Fetching:**
+  - Real-time subscriptions fetch complete message data including user profiles
+  - Improved error handling and loading states
+  - Proper cleanup of subscriptions to prevent memory leaks
+
+- **Row Level Security (RLS):**
+  - Comprehensive RLS policies for secure data access
+  - Space membership controls message and space visibility
+  - Automatic space ownership assignment via database triggers
 
 ---
 
@@ -39,22 +90,37 @@ A full-stack, multiplayer chat application where users can converse in real time
 
 ```plaintext
 ├── frontend/
-│   ├── components/
-│   ├── pages/
-│   ├── utils/
-│   ├── styles/
-│   └── ...
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── ui/           # shadcn/ui components
+│   │   │   ├── Auth.tsx
+│   │   │   ├── Chat.tsx
+│   │   │   └── SpaceManager.tsx
+│   │   ├── app/
+│   │   │   ├── globals.css
+│   │   │   ├── layout.tsx
+│   │   │   ├── page.tsx
+│   │   │   └── space/[id]/page.tsx
+│   │   ├── lib/
+│   │   │   ├── supabase.ts
+│   │   │   └── utils.ts
+│   │   └── types/
+│   │       ├── database.ts
+│   │       └── supabase.ts
+│   ├── components.json      # shadcn/ui config
+│   └── package.json
 ├── backend/
 │   ├── routes/
 │   │   └── llm.js
-│   ├── config/
-│   └── ...
-├── docker-compose.yml
+│   ├── index.js
+│   └── package.json
 ├── supabase/
 │   ├── migrations/
-│   └── ...
+│   │   └── 20250608143352_remote_schema.sql
+│   └── config.toml
+├── docker-compose.yml
 ├── README.md
-└── .env
+└── CLAUDE.md
 ```
 
 ---
@@ -73,39 +139,44 @@ A full-stack, multiplayer chat application where users can converse in real time
 ## 🔁 LLM Proxy Logic
 
 - **Frontend** posts user messages to Supabase as normal.
-- When LLM is addressed or needs to chime in (per prompt/config):
+- When Nimbus is mentioned (@Nimbus):
     1. Frontend sends relevant context and config to `/api/llm` endpoint.
     2. Backend chooses the LLM provider based on config/env.
     3. Backend applies the per-space instructions/system prompt.
     4. Backend sends prompt + chat history to LLM provider.
-    5. Backend receives response, posts as “AI user” in Supabase chat.
+    5. Backend receives response, posts as "Nimbus" in Supabase chat.
     6. Frontend gets update in real-time (Supabase Realtime).
 
 ---
 
 ## 🏗️ Configurable Instructions
 
-- Each space stores a `system_prompt` (editable by owner/admin).
+- Each space stores a `system_prompt` (editable by owner via Settings panel).
 - Prompt is injected before each LLM call, allowing for custom personality, behavior, or rules per chat.
-- Example: “You are a helpful assistant participating in a chat between several users. Respond conversationally, only when addressed by name.”
+- Default: "You are Nimbus, a helpful AI assistant participating in a multiplayer chat. Respond conversationally and helpfully when mentioned with @Nimbus."
 
 ---
 
-## 🚀 MVP Checklist
+## 🚀 Current Status
 
-1. **Supabase setup** (DB: users, spaces, messages; Auth; Storage)
-2. **Frontend**  
-   - Auth  
-   - Space creation/join by URL  
-   - Real-time chat UI  
-   - Image upload (resize & upload to Supabase Storage)  
-3. **Backend**  
-   - `/api/llm` endpoint for proxying to OpenAI, Gemini, Deepseek  
-   - Configurable per-space instructions/system prompt
-   - Posts AI responses to Supabase as system user  
-4. **Deployment**  
-   - Docker Compose for FE/BE
-   - Custom domain, Cloudflare tunnel ready
+### ✅ Completed
+- Private spaces with automatic member addition via shared links
+- Modern shadcn/ui interface with full component refactor
+- Real-time chat with proper username display
+- @Mention functionality for users and Nimbus
+- Image upload with drag & drop and preview
+- Space settings panel for owners
+- Comprehensive RLS policies and security
+- Database schema with proper relationships
+
+### 🔄 In Progress
+- Backend LLM proxy implementation
+- Enhanced error handling and edge cases
+
+### 📋 Remaining MVP Features
+- Docker deployment configuration
+- Production environment setup
+- Additional LLM provider integrations
 
 ---
 
@@ -123,13 +194,14 @@ A full-stack, multiplayer chat application where users can converse in real time
 - LLM responses are *always* proxied through backend to keep API keys secure.
 - Frontend and backend can be deployed together or separately.
 - User privacy and chat security enforced via Supabase RLS and auth.
+- All AI references have been rebranded to "Nimbus" for consistency.
 
 ---
 
 ## 🔗 References
 
 - [Supabase Docs](https://supabase.com/docs)
+- [shadcn/ui Docs](https://ui.shadcn.com)
 - [OpenAI API Docs](https://platform.openai.com/docs/)
 - [Gemini API Docs](https://ai.google.dev/gemini-api/docs)
 - [Deepseek API Docs](https://platform.deepseek.com/docs/)
-

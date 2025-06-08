@@ -5,17 +5,16 @@ import { supabase } from '@/lib/supabase'
 import { Database } from '@/types/database'
 import { Session } from '@supabase/supabase-js'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from '@/components/ui/command'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ArrowLeft, Send, Settings, Image as ImageIcon, X, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import Image from 'next/image'
 
 type Message = Database['public']['Tables']['messages']['Row'] & {
   profiles?: {
@@ -97,7 +96,7 @@ export default function Chat({ session, spaceId }: ChatProps) {
       .from('space_members')
       .select(`
         *,
-        profiles:user_id (
+        profiles(
           id,
           username
         )
@@ -114,7 +113,7 @@ export default function Chat({ session, spaceId }: ChatProps) {
       .from('messages')
       .select(`
         *,
-        profiles:user_id (
+        profiles(
           username
         )
       `)
@@ -149,12 +148,17 @@ export default function Chat({ session, spaceId }: ChatProps) {
           filter: `space_id=eq.${spaceId}`,
         },
         async (payload) => {
+          // Skip if this is our own optimistic message
+          if (payload.new.id.toString().startsWith('temp-')) {
+            return
+          }
+
           // Fetch the complete message with profile data
           const { data } = await supabase
             .from('messages')
             .select(`
               *,
-              profiles:user_id (
+              profiles(
                 username
               )
             `)
@@ -162,7 +166,14 @@ export default function Chat({ session, spaceId }: ChatProps) {
             .single()
           
           if (data) {
-            setMessages(prev => [...prev, data])
+            // Only add if not already in messages (avoid duplicates)
+            setMessages(prev => {
+              const exists = prev.some(m => m.id === data.id)
+              if (!exists) {
+                return [...prev, data]
+              }
+              return prev
+            })
           }
         }
       )
@@ -238,6 +249,7 @@ export default function Chat({ session, spaceId }: ChatProps) {
     e.preventDefault()
     if (!newMessage.trim() && !imageFile) return
 
+    const messageContent = newMessage
     setLoading(true)
     let mediaUrl = null
 
@@ -249,24 +261,54 @@ export default function Chat({ session, spaceId }: ChatProps) {
       setImageFile(null)
       setImagePreview(null)
     }
+
+    // Create optimistic message
+    const optimisticMessage = {
+      id: 'temp-' + Date.now(),
+      space_id: spaceId,
+      user_id: session.user.id,
+      content: messageContent,
+      media_url: mediaUrl,
+      is_ai: false,
+      created_at: new Date().toISOString(),
+      profiles: {
+        username: session.user.email?.split('@')[0] || 'You'
+      }
+    }
+
+    // Add optimistic message immediately
+    setMessages(prev => [...prev, optimisticMessage])
+    setNewMessage('')
     
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('messages')
       .insert({
         space_id: spaceId,
         user_id: session.user.id,
-        content: newMessage,
+        content: messageContent,
         media_url: mediaUrl,
         is_ai: false
       })
+      .select(`
+        *,
+        profiles(
+          username
+        )
+      `)
+      .single()
 
     if (error) {
       console.error('Error sending message:', error)
-    } else {
-      setNewMessage('')
+      // Remove optimistic message on error
+      setMessages(prev => prev.filter(m => m.id !== optimisticMessage.id))
+    } else if (data) {
+      // Replace optimistic message with real one
+      setMessages(prev => 
+        prev.map(m => m.id === optimisticMessage.id ? data : m)
+      )
       
       // Check if message mentions Nimbus
-      if (newMessage.toLowerCase().includes('@nimbus')) {
+      if (messageContent.toLowerCase().includes('@nimbus')) {
         triggerAIResponse()
       }
     }
@@ -276,7 +318,7 @@ export default function Chat({ session, spaceId }: ChatProps) {
 
   const triggerAIResponse = async () => {
     try {
-      const response = await fetch(`${process.env.NODE_ENV === 'production' ? 'http://backend:3001' : 'http://localhost:3011'}/api/llm`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3011'}/api/llm`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -348,12 +390,15 @@ export default function Chat({ session, spaceId }: ChatProps) {
         return null // Skip file extensions
       } else if (part.match(/^https?:\/\//)) {
         return (
-          <img
+          <Image
             key={index}
             src={part}
             alt="Shared image"
             className="max-w-full rounded-lg mt-2"
             style={{ maxHeight: '400px' }}
+            width={400}
+            height={400}
+            unoptimized
           />
         )
       }
@@ -463,11 +508,14 @@ export default function Chat({ session, spaceId }: ChatProps) {
                     <div className="text-sm">
                       {renderMessage(message.content)}
                       {message.media_url && (
-                        <img
+                        <Image
                           src={message.media_url}
                           alt="Uploaded image"
                           className="max-w-full rounded-lg mt-2"
                           style={{ maxHeight: '400px' }}
+                          width={400}
+                          height={400}
+                          unoptimized
                         />
                       )}
                     </div>
@@ -485,10 +533,13 @@ export default function Chat({ session, spaceId }: ChatProps) {
         <div className="container mx-auto max-w-4xl p-4">
           {imagePreview && (
             <div className="mb-2 relative inline-block">
-              <img
+              <Image
                 src={imagePreview}
                 alt="Preview"
                 className="h-20 rounded-lg"
+                width={80}
+                height={80}
+                unoptimized
               />
               <Button
                 size="sm"
