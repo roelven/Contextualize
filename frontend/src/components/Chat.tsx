@@ -138,7 +138,6 @@ export default function Chat({ session, spaceId }: ChatProps) {
     initialize()
     
     // Subscribe to real-time messages
-    console.log('🔌 Setting up real-time subscription for space:', spaceId)
     const subscription = supabase
       .channel(`messages:${spaceId}`)
       .on(
@@ -150,7 +149,6 @@ export default function Chat({ session, spaceId }: ChatProps) {
           filter: `space_id=eq.${spaceId}`,
         },
         async (payload) => {
-          console.log('🔔 Real-time INSERT event:', payload.new)
           // Skip if this is our own optimistic message
           if (payload.new.id.toString().startsWith('temp-')) {
             return
@@ -169,21 +167,17 @@ export default function Chat({ session, spaceId }: ChatProps) {
             .single()
           
           if (data) {
-            console.log('📨 Processing new message:', data.id, 'Expected:', completedMessageId)
             // Only add if not already in messages (avoid duplicates)
             setMessages(prev => {
               const exists = prev.some(m => m.id === data.id)
               if (!exists) {
-                console.log('➕ Adding new message to state')
                 return [...prev, data]
               }
-              console.log('⚠️ Message already exists, skipping')
               return prev
             })
             
             // If this is the completed streaming message, clear streaming state
             if (data.is_ai && data.id === completedMessageId) {
-              console.log('✅ Real-time picked up completed message, clearing streaming state')
               setStreamingMessage('')
               setCompletedMessageId(null)
             }
@@ -385,7 +379,6 @@ export default function Chat({ session, spaceId }: ChatProps) {
 
   const triggerAIResponse = async () => {
     try {
-      console.log('🚀 STARTING AI RESPONSE - YOU SHOULD SEE THIS!')
       // Start streaming state
       setIsStreaming(true)
       setNimbusTyping(true)
@@ -426,7 +419,6 @@ export default function Chat({ session, spaceId }: ChatProps) {
               break
               
             case 'complete':
-              console.log('📥 Streaming completed, message saved:', data.messageId)
               // Manually fetch the saved message instead of relying on real-time
               setIsStreaming(false)
               setNimbusTyping(false)
@@ -447,7 +439,6 @@ export default function Chat({ session, spaceId }: ChatProps) {
                   .single()
                 
                 if (savedMessage) {
-                  console.log('✅ Manually fetched completed message:', savedMessage.id)
                   // Add the real message
                   setMessages(prev => {
                     const exists = prev.some(m => m.id === savedMessage.id)
@@ -503,8 +494,6 @@ export default function Chat({ session, spaceId }: ChatProps) {
 
     if (error) {
       console.error('Error updating space settings:', error)
-    } else {
-      console.log('Space settings updated successfully')
     }
   }
 
