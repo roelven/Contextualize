@@ -34,12 +34,6 @@ interface ChatProps {
   spaceId: string
 }
 
-interface LLMRequest {
-  spaceId: string
-  messages: Array<{ role: string; content: string }>
-  systemPrompt: string
-  provider: string
-}
 
 export default function Chat({ session, spaceId }: ChatProps) {
   const router = useRouter()
@@ -48,6 +42,7 @@ export default function Chat({ session, spaceId }: ChatProps) {
   const [loading, setLoading] = useState(false)
   const [spaceName, setSpaceName] = useState('Loading...')
   const [systemPrompt, setSystemPrompt] = useState('')
+  const [temperature, setTemperature] = useState(0.7)
   const [isOwner, setIsOwner] = useState(false)
   const [members, setMembers] = useState<SpaceMember[]>([])
   const [showMentions, setShowMentions] = useState(false)
@@ -56,10 +51,15 @@ export default function Chat({ session, spaceId }: ChatProps) {
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const [nimbusTyping, setNimbusTyping] = useState(false)
+  const [streamingMessage, setStreamingMessage] = useState<string>('')
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [completedMessageId, setCompletedMessageId] = useState<string | null>(null)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const eventSourceRef = useRef<EventSource | null>(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -68,7 +68,7 @@ export default function Chat({ session, spaceId }: ChatProps) {
   const fetchSpaceInfo = useCallback(async () => {
     const { data: space, error } = await supabase
       .from('spaces')
-      .select('name, system_prompt')
+      .select('name, system_prompt, temperature')
       .eq('id', spaceId)
       .single()
 
@@ -78,6 +78,7 @@ export default function Chat({ session, spaceId }: ChatProps) {
     } else {
       setSpaceName(space.name)
       setSystemPrompt(space.system_prompt)
+      setTemperature(space.temperature || 0.7)
     }
 
     // Check if user is owner
@@ -137,6 +138,7 @@ export default function Chat({ session, spaceId }: ChatProps) {
     initialize()
     
     // Subscribe to real-time messages
+    console.log('🔌 Setting up real-time subscription for space:', spaceId)
     const subscription = supabase
       .channel(`messages:${spaceId}`)
       .on(
@@ -148,6 +150,7 @@ export default function Chat({ session, spaceId }: ChatProps) {
           filter: `space_id=eq.${spaceId}`,
         },
         async (payload) => {
+          console.log('🔔 Real-time INSERT event:', payload.new)
           // Skip if this is our own optimistic message
           if (payload.new.id.toString().startsWith('temp-')) {
             return
@@ -166,27 +169,91 @@ export default function Chat({ session, spaceId }: ChatProps) {
             .single()
           
           if (data) {
+            console.log('📨 Processing new message:', data.id, 'Expected:', completedMessageId)
             // Only add if not already in messages (avoid duplicates)
             setMessages(prev => {
               const exists = prev.some(m => m.id === data.id)
               if (!exists) {
+                console.log('➕ Adding new message to state')
                 return [...prev, data]
               }
+              console.log('⚠️ Message already exists, skipping')
               return prev
             })
+            
+            // If this is the completed streaming message, clear streaming state
+            if (data.is_ai && data.id === completedMessageId) {
+              console.log('✅ Real-time picked up completed message, clearing streaming state')
+              setStreamingMessage('')
+              setCompletedMessageId(null)
+            }
+            
+            // If this is an AI message with empty content, it means Nimbus is starting to type
+            if (data.is_ai && data.content === '') {
+              setNimbusTyping(true)
+            }
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `space_id=eq.${spaceId}`,
+        },
+        async (payload) => {
+          // Fetch the updated message with profile data
+          const { data } = await supabase
+            .from('messages')
+            .select(`
+              *,
+              profiles(
+                username
+              )
+            `)
+            .eq('id', payload.new.id)
+            .single()
+          
+          if (data) {
+            // Update the existing message in the list
+            setMessages(prev => 
+              prev.map(m => m.id === data.id ? data : m)
+            )
+            
+            // If this is an AI message and it has content, Nimbus is done typing
+            if (data.is_ai && data.content && data.content.length > 0) {
+              setNimbusTyping(false)
+            }
           }
         }
       )
       .subscribe()
 
+    // Handle page visibility changes to ensure real-time works when tab regains focus
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        // Refresh messages when tab becomes visible to ensure we haven't missed anything
+        fetchMessages()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
     return () => {
       subscription.unsubscribe()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      // Cleanup EventSource
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close()
+      }
     }
   }, [spaceId, fetchMessages, fetchSpaceInfo, fetchMembers])
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+  }, [messages, streamingMessage, completedMessageId])
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
@@ -318,38 +385,126 @@ export default function Chat({ session, spaceId }: ChatProps) {
 
   const triggerAIResponse = async () => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3011'}/api/llm`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          spaceId,
-          messages: messages.slice(-10).map(m => ({
-            role: m.is_ai ? 'assistant' : 'user',
-            content: m.content
-          })),
-          systemPrompt: systemPrompt || 'You are Nimbus, a helpful AI assistant participating in a multiplayer chat. Respond conversationally and helpfully.',
-          provider: 'openai'
-        } as LLMRequest),
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to get AI response')
+      console.log('🚀 STARTING AI RESPONSE - YOU SHOULD SEE THIS!')
+      // Start streaming state
+      setIsStreaming(true)
+      setNimbusTyping(true)
+      setStreamingMessage('')
+      setCompletedMessageId(null)
+      
+      // Close any existing EventSource
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close()
       }
+      
+      // Create new EventSource with POST data as query params (EventSource only supports GET)
+      const params = new URLSearchParams({
+        spaceId,
+        systemPrompt: systemPrompt || 'You are Nimbus, a helpful AI assistant participating in a multiplayer chat. Respond conversationally and helpfully.',
+        provider: 'openai',
+        temperature: temperature.toString(),
+        messages: JSON.stringify(messages.slice(-10).map(m => ({
+          role: m.is_ai ? 'assistant' : 'user',
+          content: m.content
+        })))
+      })
+      
+      const eventSource = new EventSource(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001'}/api/llm?${params}`)
+      eventSourceRef.current = eventSource
+      
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          
+          switch (data.type) {
+            case 'start':
+              break
+              
+            case 'chunk':
+              // Add chunk to streaming message
+              setStreamingMessage(prev => prev + data.content)
+              break
+              
+            case 'complete':
+              console.log('📥 Streaming completed, message saved:', data.messageId)
+              // Manually fetch the saved message instead of relying on real-time
+              setIsStreaming(false)
+              setNimbusTyping(false)
+              setCompletedMessageId(data.messageId)
+              eventSource.close()
+              
+              // Fetch the complete message with profile data
+              setTimeout(async () => {
+                const { data: savedMessage } = await supabase
+                  .from('messages')
+                  .select(`
+                    *,
+                    profiles(
+                      username
+                    )
+                  `)
+                  .eq('id', data.messageId)
+                  .single()
+                
+                if (savedMessage) {
+                  console.log('✅ Manually fetched completed message:', savedMessage.id)
+                  // Add the real message
+                  setMessages(prev => {
+                    const exists = prev.some(m => m.id === savedMessage.id)
+                    if (!exists) {
+                      return [...prev, savedMessage]
+                    }
+                    return prev
+                  })
+                  
+                  // Clear streaming state
+                  setStreamingMessage('')
+                  setCompletedMessageId(null)
+                }
+              }, 100)
+              break
+              
+            case 'error':
+              console.error('Streaming error:', data.message)
+              setIsStreaming(false)
+              setNimbusTyping(false)
+              setStreamingMessage('')
+              eventSource.close()
+              break
+          }
+        } catch (parseError) {
+          console.error('Error parsing SSE event:', parseError)
+        }
+      }
+      
+      eventSource.onerror = () => {
+        setIsStreaming(false)
+        setNimbusTyping(false)
+        setStreamingMessage('')
+        eventSource.close()
+      }
+      
     } catch (error) {
-      console.error('Error getting AI response:', error)
+      console.error('Error setting up AI response stream:', error)
+      setIsStreaming(false)
+      setNimbusTyping(false)
+      setStreamingMessage('')
     }
   }
 
-  const updateSystemPrompt = async () => {
+  const updateSpaceSettings = async () => {
     const { error } = await supabase
       .from('spaces')
-      .update({ system_prompt: systemPrompt })
+      .update({ 
+        system_prompt: systemPrompt,
+        temperature: temperature
+      })
       .eq('id', spaceId)
 
     if (error) {
-      console.error('Error updating system prompt:', error)
+      console.error('Error updating space settings:', error)
+    } else {
+      console.log('Space settings updated successfully')
     }
   }
 
@@ -455,14 +610,34 @@ export default function Chat({ session, spaceId }: ChatProps) {
                         className="mt-2 min-h-[150px]"
                         placeholder="Configure how Nimbus should behave..."
                       />
-                      <Button
-                        onClick={updateSystemPrompt}
-                        className="mt-2"
-                        size="sm"
-                      >
-                        Save Changes
-                      </Button>
                     </div>
+                    <div>
+                      <Label htmlFor="temperature">Temperature (Creativity): {temperature}</Label>
+                      <div className="mt-2">
+                        <input
+                          id="temperature"
+                          type="range"
+                          min="0"
+                          max="2"
+                          step="0.1"
+                          value={temperature}
+                          onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                          className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                        />
+                        <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                          <span>Focused (0.0)</span>
+                          <span>Balanced (1.0)</span>
+                          <span>Creative (2.0)</span>
+                        </div>
+                      </div>
+                    </div>
+                    <Button
+                      onClick={updateSpaceSettings}
+                      className="mt-4"
+                      size="sm"
+                    >
+                      Save All Changes
+                    </Button>
                   </div>
                 </SheetContent>
               </Sheet>
@@ -524,6 +699,54 @@ export default function Chat({ session, spaceId }: ChatProps) {
               </div>
             )
           })}
+          
+          {/* Streaming message from Nimbus */}
+          {(isStreaming || completedMessageId) && streamingMessage && (
+            <div className="flex gap-3">
+              <Avatar className="h-8 w-8">
+                <AvatarFallback>N</AvatarFallback>
+              </Avatar>
+              <div className="flex-1">
+                <div className="flex items-baseline gap-2 mb-1">
+                  <span className="text-sm font-medium">Nimbus</span>
+                  <span className="text-xs text-muted-foreground">
+                    {isStreaming ? 'streaming...' : 'saving...'}
+                  </span>
+                </div>
+                <Card className="inline-block p-3">
+                  <div className="text-sm">
+                    {renderMessage(streamingMessage)}
+                    <span className="animate-pulse">|</span>
+                  </div>
+                </Card>
+              </div>
+            </div>
+          )}
+          
+          {/* Typing indicator for Nimbus (when starting to stream) */}
+          {nimbusTyping && !streamingMessage && (
+            <div className="flex gap-3">
+              <Avatar className="h-8 w-8">
+                <AvatarFallback>N</AvatarFallback>
+              </Avatar>
+              <div className="flex-1">
+                <div className="flex items-baseline gap-2 mb-1">
+                  <span className="text-sm font-medium">Nimbus</span>
+                </div>
+                <Card className="inline-block p-3">
+                  <div className="flex items-center gap-1">
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                      <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                      <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></div>
+                    </div>
+                    <span className="text-sm text-muted-foreground ml-2">thinking...</span>
+                  </div>
+                </Card>
+              </div>
+            </div>
+          )}
+          
           <div ref={messagesEndRef} />
         </div>
       </ScrollArea>

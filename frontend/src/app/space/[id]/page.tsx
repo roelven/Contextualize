@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
@@ -33,47 +33,54 @@ export default function SpacePage() {
     return () => subscription.unsubscribe()
   }, [])
 
+  const checkSpaceAccess = useCallback(async () => {
+    if (!session || !spaceId) return
+    
+    setCheckingAccess(true)
+    
+    try {
+      // Check if user is already a member
+      const { data: memberData } = await supabase
+        .from('space_members')
+        .select('id')
+        .eq('space_id', spaceId)
+        .eq('user_id', session.user.id)
+        .single()
+
+      if (memberData) {
+        setHasAccess(true)
+      } else {
+        // If not a member, add them as a member (they accessed via shared link)
+        const { error } = await supabase
+          .from('space_members')
+          .insert({
+            space_id: spaceId,
+            user_id: session.user.id,
+            role: 'member'
+          })
+
+        if (!error) {
+          setHasAccess(true)
+        } else {
+          console.error('Error adding user to space:', error)
+          setHasAccess(false)
+        }
+      }
+    } catch (error) {
+      console.error('Error checking space access:', error)
+      setHasAccess(false)
+    } finally {
+      setCheckingAccess(false)
+    }
+  }, [session, spaceId])
+
   useEffect(() => {
     if (session && spaceId) {
       checkSpaceAccess()
     } else if (!loading && !session) {
       setCheckingAccess(false)
     }
-  }, [session, spaceId, loading]) // checkSpaceAccess is defined inline and uses session/spaceId which are already in deps
-
-  const checkSpaceAccess = async () => {
-    setCheckingAccess(true)
-    
-    // Check if user is already a member
-    const { data: memberData } = await supabase
-      .from('space_members')
-      .select('id')
-      .eq('space_id', spaceId)
-      .eq('user_id', session!.user.id)
-      .single()
-
-    if (memberData) {
-      setHasAccess(true)
-    } else {
-      // If not a member, add them as a member (they accessed via shared link)
-      const { error } = await supabase
-        .from('space_members')
-        .insert({
-          space_id: spaceId,
-          user_id: session!.user.id,
-          role: 'member'
-        })
-
-      if (!error) {
-        setHasAccess(true)
-      } else {
-        console.error('Error adding user to space:', error)
-        setHasAccess(false)
-      }
-    }
-    
-    setCheckingAccess(false)
-  }
+  }, [session, spaceId, loading, checkSpaceAccess])
 
   if (loading || checkingAccess) {
     return (

@@ -43,35 +43,86 @@ app.get('/health', (req, res) => {
   })
 })
 
-app.post('/api/llm', async (req, res) => {
+// Handle both POST and GET for LLM endpoint (GET for SSE streaming)
+app.all('/api/llm', async (req, res) => {
   try {
-    const { spaceId, messages, systemPrompt, provider = 'openai' } = req.body
+    // Extract parameters from either body (POST) or query (GET)
+    let { spaceId, messages, systemPrompt, provider = 'openai', temperature = 0.7 } = 
+      req.method === 'POST' ? req.body : {
+        spaceId: req.query.spaceId,
+        messages: JSON.parse(req.query.messages || '[]'),
+        systemPrompt: req.query.systemPrompt,
+        provider: req.query.provider || 'openai',
+        temperature: parseFloat(req.query.temperature || '0.7')
+      }
 
     // Default system prompt if none provided
     const finalSystemPrompt = systemPrompt || 'You are Nimbus, a helpful AI assistant participating in a multiplayer chat. Respond conversationally and helpfully when mentioned with @Nimbus.'
 
     if (provider === 'openai') {
+      // Set up Server-Sent Events headers
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control'
+      })
+      
+      // Send initial connection event
+      res.write('data: {"type": "start"}\n\n')
+      
       const completion = await openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages: [
           { role: 'system', content: finalSystemPrompt },
           ...messages
         ],
+        temperature: temperature,
+        stream: true,
       })
 
-      const aiResponse = completion.choices[0].message.content
-
-      const { error } = await supabase
-        .from('messages')
-        .insert({
-          space_id: spaceId,
-          content: aiResponse,
-          is_ai: true
-        })
-
-      if (error) throw error
-
-      res.json({ success: true, message: aiResponse })
+      let fullResponse = ''
+      
+      try {
+        // Stream the response chunks
+        for await (const chunk of completion) {
+          const content = chunk.choices[0]?.delta?.content || ''
+          if (content) {
+            fullResponse += content
+            
+            // Send chunk as SSE event
+            res.write(`data: ${JSON.stringify({ type: 'chunk', content })}\n\n`)
+          }
+        }
+        
+        // Save complete message to database only when streaming ends
+        const { data: savedMessage, error: insertError } = await supabase
+          .from('messages')
+          .insert({
+            space_id: spaceId,
+            content: fullResponse,
+            is_ai: true
+          })
+          .select()
+          .single()
+        
+        if (insertError) throw insertError
+        
+        // Send completion event with message ID
+        res.write(`data: ${JSON.stringify({ 
+          type: 'complete', 
+          messageId: savedMessage.id,
+          content: fullResponse 
+        })}\n\n`)
+        
+      } catch (streamError) {
+        console.error('Streaming error:', streamError)
+        res.write(`data: ${JSON.stringify({ type: 'error', message: 'Streaming failed' })}\n\n`)
+      }
+      
+      res.end()
+      return
     } else if (provider === 'gemini') {
       const model = genAI.getGenerativeModel({ model: 'gemini-pro' })
       

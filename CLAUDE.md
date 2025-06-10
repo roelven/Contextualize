@@ -57,10 +57,13 @@ A full-stack, multiplayer chat application where users can converse in real time
   - Owners can configure system prompt for Nimbus behavior
   - Settings saved to database with real-time updates
 
-- **Nimbus AI Assistant:**
+- **Nimbus AI Assistant with Streaming Responses:**
   - All references changed from "AI" to "Nimbus" 
   - Updated system prompts and UI references accordingly
   - Nimbus participates as a chat member when mentioned
+  - **Real-time streaming responses** with character-by-character display
+  - **Temperature control** (0.0-2.0) for response creativity in space settings
+  - **Typing indicators** that show when Nimbus is generating responses
   - Proxy backend ensures API keys for all providers stay secret
 
 - **Authentication:**  
@@ -136,16 +139,34 @@ A full-stack, multiplayer chat application where users can converse in real time
 
 ---
 
-## 🔁 LLM Proxy Logic
+## 🔁 LLM Proxy Logic & Streaming Architecture
 
+### **Standard Message Flow**
 - **Frontend** posts user messages to Supabase as normal.
-- When Nimbus is mentioned (@Nimbus):
-    1. Frontend sends relevant context and config to `/api/llm` endpoint.
-    2. Backend chooses the LLM provider based on config/env.
-    3. Backend applies the per-space instructions/system prompt.
-    4. Backend sends prompt + chat history to LLM provider.
-    5. Backend receives response, posts as "Nimbus" in Supabase chat.
-    6. Frontend gets update in real-time (Supabase Realtime).
+- Real-time subscriptions ensure all participants see messages instantly.
+
+### **Nimbus Streaming Response Flow**
+When Nimbus is mentioned (@Nimbus):
+1. **Frontend** sends context and config to `/api/llm` endpoint via fetch request.
+2. **Backend** chooses LLM provider based on config/env variables.
+3. **Backend** applies per-space system prompt and temperature settings.
+4. **Backend** initiates streaming response using **Server-Sent Events (SSE)**:
+   - Sets appropriate SSE headers (`text/event-stream`, `Cache-Control: no-cache`)
+   - Sends LLM prompt + chat history to provider with `stream: true`
+   - Receives streaming chunks from LLM provider
+5. **Backend** streams each chunk to frontend via SSE format.
+6. **Frontend** processes SSE stream with EventSource:
+   - Shows "Nimbus is typing..." indicator when stream starts
+   - Builds message content character-by-character in real-time
+   - Updates UI immediately for responsive user experience
+7. **Backend** saves complete response to Supabase when streaming ends.
+8. **Other users** see the final message via Supabase Realtime subscriptions.
+
+### **Architecture Benefits**
+- **True streaming UX**: Character-by-character display as LLM generates
+- **Real-time for all users**: Other participants see typing indicators and final messages
+- **Reliable delivery**: SSE provides automatic reconnection and proper error handling
+- **Scalable**: No database polling or rapid updates required
 
 ---
 
@@ -165,18 +186,59 @@ A full-stack, multiplayer chat application where users can converse in real time
 - Real-time chat with proper username display
 - @Mention functionality for users and Nimbus
 - Image upload with drag & drop and preview
-- Space settings panel for owners
+- Space settings panel for owners with temperature control
 - Comprehensive RLS policies and security
 - Database schema with proper relationships
+- Basic LLM proxy implementation (non-streaming)
 
 ### 🔄 In Progress
-- Backend LLM proxy implementation
-- Enhanced error handling and edge cases
+- **SSE Streaming Implementation** for real-time LLM responses
+- Character-by-character response display
+- Enhanced typing indicators for streaming
 
 ### 📋 Remaining MVP Features
+- Complete SSE streaming architecture (see todo list below)
 - Docker deployment configuration
 - Production environment setup
-- Additional LLM provider integrations
+- Additional LLM provider integrations (Gemini, Deepseek)
+
+---
+
+## 📋 SSE Streaming Implementation Todo List
+
+### 🔄 Current Sprint: Server-Sent Events Architecture
+
+**Priority: HIGH** - Size: M (Medium, ~1-2 hours)
+
+- [ ] **Backend SSE Implementation** (`backend/index.js`)
+  - [ ] Replace current streaming logic with proper SSE headers
+  - [ ] Format streaming chunks as SSE events (`data: {chunk}\n\n`)
+  - [ ] Handle connection cleanup and error states
+  - [ ] Save complete message to database only when streaming ends
+
+- [ ] **Frontend SSE Handler** (`frontend/src/components/Chat.tsx`)
+  - [ ] Replace fetch with EventSource for `/api/llm` endpoint
+  - [ ] Implement message building from streaming chunks
+  - [ ] Add real-time character-by-character UI updates
+  - [ ] Handle EventSource connection states and errors
+
+- [ ] **Enhanced Typing Indicators**
+  - [ ] Show typing indicator when SSE stream starts
+  - [ ] Hide typing indicator when stream completes
+  - [ ] Ensure other users see typing status via real-time
+
+- [ ] **Testing & Validation**
+  - [ ] Test streaming with different message lengths
+  - [ ] Test multiple concurrent users seeing streams
+  - [ ] Test error handling and connection recovery
+  - [ ] Test temperature control integration
+
+### 🎯 Success Criteria
+- Nimbus responses appear character-by-character as they're generated
+- All users in space see real-time streaming simultaneously
+- Typing indicators work correctly for streaming state
+- No focus/defocus required to see responses
+- Graceful error handling and connection recovery
 
 ---
 

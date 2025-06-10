@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
@@ -24,11 +24,7 @@ export default function SpaceManager({ session }: SpaceManagerProps) {
   const [newSpaceName, setNewSpaceName] = useState('')
   const [creatingSpace, setCreatingSpace] = useState(false)
 
-  useEffect(() => {
-    fetchSpaces()
-  }, [])
-
-  const fetchSpaces = async () => {
+  const fetchSpaces = useCallback(async () => {
     // First, get all space IDs where the user is a member
     const { data: membershipData, error: membershipError } = await supabase
       .from('space_members')
@@ -61,7 +57,11 @@ export default function SpaceManager({ session }: SpaceManagerProps) {
       setSpaces(data || [])
     }
     setLoading(false)
-  }
+  }, [session.user.id])
+
+  useEffect(() => {
+    fetchSpaces()
+  }, [fetchSpaces])
 
   const createSpace = async (e: React.FormEvent) => {
     e.preventDefault()
